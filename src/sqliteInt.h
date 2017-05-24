@@ -219,7 +219,10 @@
 ** So we have to define the macros in different ways depending on the
 ** compiler.
 */
-#if defined(__PTRDIFF_TYPE__)  /* This case should work for GCC */
+#if defined(__CHERI_PURE_CAPABILITY__)
+# define SQLITE_INT_TO_PTR(X)  ((void*)(X))
+# define SQLITE_PTR_TO_INT(X)  ((vaddr_t)(X))
+#elif defined(__PTRDIFF_TYPE__)  /* This case should work for GCC */
 # define SQLITE_INT_TO_PTR(X)  ((void*)(__PTRDIFF_TYPE__)(X))
 # define SQLITE_PTR_TO_INT(X)  ((int)(__PTRDIFF_TYPE__)(X))
 #elif !defined(__GNUC__)       /* Works for compilers other than LLVM */
