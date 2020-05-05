@@ -11569,7 +11569,7 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether to support FTS3" >&5
 $as_echo_n "checking whether to support FTS3... " >&6; }
 if test "${enable_fts3}" = "yes" ; then
-  OPT_FEATURE_FLAGS="${OPT_FEATURE_FLAGS} -DSQLITE_ENABLE_FTS3"
+  OPT_FEATURE_FLAGS="${OPT_FEATURE_FLAGS} -DSQLITE_ENABLE_FTS3 -DSQLITE_ENABLE_FTS3_PARENTHESIS"
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else
