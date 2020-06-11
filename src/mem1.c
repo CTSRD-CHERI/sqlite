@@ -117,6 +117,8 @@ static malloc_zone_t* _sqliteZone_;
 
 #endif /* __APPLE__ or not __APPLE__ */
 
+_Static_assert(SQLITE_DEFAULT_ALIGNMENT % sizeof(int64_t) == 0, "");
+
 /*
 ** Like malloc(), but remember the size of the allocation
 ** so that we can find it later using sqlite3MemSize().
@@ -139,9 +141,9 @@ static void *sqlite3MemMalloc(int nByte){
   sqlite3_int64 *p;
   assert( nByte>0 );
   testcase( ROUND8(nByte)!=nByte );
-  p = SQLITE_MALLOC( nByte+sizeof(uintptr_t) );
+  p = SQLITE_MALLOC( nByte+SQLITE_DEFAULT_ALIGNMENT );
   if( p ){
-    p += (sizeof(uintptr_t)/sizeof(int64_t))-1;
+    p += (SQLITE_DEFAULT_ALIGNMENT/sizeof(int64_t))-1;
     p[0] = nByte;
     p++;
   }else{
@@ -166,7 +168,7 @@ static void sqlite3MemFree(void *pPrior){
 #else
   sqlite3_int64 *p = (sqlite3_int64*)pPrior;
   assert( pPrior!=0 );
-  p -= (sizeof(uintptr_t)/sizeof(int64_t));
+  p -= (SQLITE_DEFAULT_ALIGNMENT/sizeof(int64_t));
   SQLITE_FREE(p);
 #endif
 }
@@ -212,10 +214,10 @@ static void *sqlite3MemRealloc(void *pPrior, int nByte){
   sqlite3_int64 *p = (sqlite3_int64*)pPrior;
   assert( pPrior!=0 && nByte>0 );
   assert( nByte==ROUND8(nByte) ); /* EV: R-46199-30249 */
-  p -= (sizeof(uintptr_t)/sizeof(int64_t));
-  p = SQLITE_REALLOC(p, nByte+sizeof(uintptr_t) );
+  p -= (SQLITE_DEFAULT_ALIGNMENT/sizeof(int64_t));
+  p = SQLITE_REALLOC(p, nByte+SQLITE_DEFAULT_ALIGNMENT );
   if( p ){
-    p += (sizeof(uintptr_t)/sizeof(int64_t))-1;
+    p += (SQLITE_DEFAULT_ALIGNMENT/sizeof(int64_t))-1;
     p[0] = nByte;
     p++;
   }else{
