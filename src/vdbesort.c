@@ -1740,6 +1740,7 @@ static int vdbeSorterFlushPMA(VdbeSorter *pSorter){
       assert( pTask->list.aMemory==0 || pSorter->list.aMemory!=0 );
 
       aMem = pTask->list.aMemory;
+      assert( EIGHT_BYTE_ALIGNMENT(aMem) );
       pCtx = (void*)pTask;
       pSorter->iPrev = (u8)(pTask - pSorter->aTask);
       pTask->list = pSorter->list;
