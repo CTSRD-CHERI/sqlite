@@ -268,9 +268,10 @@ static VdbeCursor *allocateCursor(
 
   int nByte;
   VdbeCursor *pCx = 0;
-  nByte = 
-      ROUND8P(sizeof(VdbeCursor)) + 2*sizeof(u32)*nField + 
-      (eCurType==CURTYPE_BTREE?sqlite3BtreeCursorSize():0);
+  size_t basicSize = ROUND8(ROUND8(sizeof(VdbeCursor)) + 2*sizeof(u32)*nField);
+  assert( EIGHT_BYTE_ALIGNMENT(SQLITE_INT_TO_PTR(basicSize)) );
+  nByte = ROUND8(basicSize + (eCurType==CURTYPE_BTREE?sqlite3BtreeCursorSize():0));
+  assert( EIGHT_BYTE_ALIGNMENT(SQLITE_INT_TO_PTR(nByte)) );
 
   assert( iCur>=0 && iCur<p->nCursor );
   if( p->apCsr[iCur] ){ /*OPTIMIZATION-IF-FALSE*/
