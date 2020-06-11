@@ -953,18 +953,39 @@ typedef INT16_TYPE LogEst;
 ** ROUND8P() assumes that the argument is already an integer number of
 ** pointers in size, and so it is a no-op on systems where the pointer
 ** size is 8.
+**
+** XXXAR: For CHERI, we change these macros to ensure 16-byte alignement since
+** renaming them would cause too many conflicts
 */
-#define ROUND8(x)     (((x)+7)&~7)
+#if __has_builtin(__builtin_align_up)
+# define ROUND(x, a) __builtin_align_up(x, a)
+#else
+# define ROUND(x, a)     (((x)+(a-1))&~(a-1))
+#endif
+/* XXX: not actually 8 for CHERI */
+#define ROUND8(x) ROUND(x, SQLITE_DEFAULT_ALIGNMENT)
 #if SQLITE_PTRSIZE==8
 # define ROUND8P(x)   (x)
 #else
-# define ROUND8P(x)   (((x)+7)&~7)
+# define ROUND8P(x)   ROUND8(x)
 #endif
 
 /*
 ** Round down to the nearest multiple of 8
 */
-#define ROUNDDOWN8(x) ((x)&~7)
+#if __has_builtin(__builtin_align_down)
+# define ROUNDDOWN(x, a) __builtin_align_down(x, 8)
+#else
+# define ROUNDDOWN(x, a) ((x)&~(a-1))
+#endif
+/* XXX: not actually 8 for CHERI */
+#define ROUNDDOWN8(x) ROUNDDOWN(x, SQLITE_DEFAULT_ALIGNMENT)
+
+#if __has_builtin(__builtin_is_aligned)
+# define ALIGNED_TO(X, A) __builtin_is_aligned(X, A)
+#else
+# define ALIGNED_TO(X, A) ((((char*)(X) - (char*)0)&((A)-1))==0)
+#endif
 
 /*
 ** Assert that the pointer X is aligned to an 8-byte boundary.  This
@@ -978,7 +999,12 @@ typedef INT16_TYPE LogEst;
 #ifdef SQLITE_4_BYTE_ALIGNED_MALLOC
 # define EIGHT_BYTE_ALIGNMENT(X)   ((((char*)(X) - (char*)0)&3)==0)
 #else
-# define EIGHT_BYTE_ALIGNMENT(X)   ((((char*)(X) - (char*)0)&7)==0)
+/*
+ * For CHERI support we want 16-byte alignment. We also do this for native to
+ * make debugging easier. The macro name is a lie anyway so I don't see why we
+ * should't lie just a little bit more.
+ */
+# define EIGHT_BYTE_ALIGNMENT(X) ALIGNED_TO(X, SQLITE_DEFAULT_ALIGNMENT)
 #endif
 
 /*
