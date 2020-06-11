@@ -1026,6 +1026,14 @@ typedef INT16_TYPE LogEst;
 #define LARGEST_UINT64 (0xffffffff|(((u64)0xffffffff)<<32))
 #define SMALLEST_INT64 (((i64)-1) - LARGEST_INT64)
 
+
+#define REQUIRE_CHERI_ALIGNMENT
+#ifdef REQUIRE_CHERI_ALIGNMENT
+# define SQLITE_DEFAULT_ALIGNMENT (sizeof(void*) < 16 ? 16 : sizeof(void*))
+#else
+# define SQLITE_DEFAULT_ALIGNMENT (sizeof(void*) < 8 ? 8 : sizeof(void*))
+#endif
+
 /*
 ** Macro SMXV(n) return the maximum value that can be held in variable n,
 ** assuming n is a signed integer type.  UMXV(n) is similar for unsigned
