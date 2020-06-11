@@ -4561,11 +4561,10 @@ static int btreeCursor(
 
   /* Now that no other errors can occur, finish filling in the BtCursor
   ** variables and link the cursor into the BtShared list.  */
-  assert(EIGHT_BYTE_ALIGNMENT(pCur));
+  assert( EIGHT_BYTE_ALIGNMENT(pCur) );
   pCur->pgnoRoot = iTable;
   pCur->iPage = -1;
   pCur->pKeyInfo = pKeyInfo;
-  assert(EIGHT_BYTE_ALIGNMENT(&pCur->pKeyInfo));
   pCur->pBtree = p;
   pCur->pBt = pBt;
   pCur->curFlags = 0;
