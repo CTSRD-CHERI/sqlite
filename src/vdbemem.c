@@ -1399,6 +1399,7 @@ static sqlite3_value *valueNew(sqlite3 *db, struct ValueNewStat4Ctx *p){
           assert( pRec->pKeyInfo->nAllField==nCol );
           assert( pRec->pKeyInfo->enc==ENC(db) );
           pRec->aMem = (Mem *)((u8*)pRec + ROUND8(sizeof(UnpackedRecord)));
+          assert( EIGHT_BYTE_ALIGNMENT(pRec->aMem) );
           for(i=0; i<nCol; i++){
             pRec->aMem[i].flags = MEM_Null;
             pRec->aMem[i].db = db;
@@ -1911,6 +1912,7 @@ void sqlite3Stat4ProbeFree(UnpackedRecord *pRec){
     int i;
     int nCol = pRec->pKeyInfo->nAllField;
     Mem *aMem = pRec->aMem;
+    assert( EIGHT_BYTE_ALIGNMENT(aMem) );
     sqlite3 *db = aMem[0].db;
     for(i=0; i<nCol; i++){
       sqlite3VdbeMemRelease(&aMem[i]);

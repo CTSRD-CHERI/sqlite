@@ -2170,6 +2170,7 @@ int sqlite3VdbeNextOpcode(
 void sqlite3VdbeFrameDelete(VdbeFrame *p){
   int i;
   Mem *aMem = VdbeFrameMem(p);
+  assert( EIGHT_BYTE_ALIGNMENT(aMem) );
   VdbeCursor **apCsr = (VdbeCursor **)&aMem[p->nChildMem];
   assert( sqlite3VdbeFrameIsValid(p) );
   for(i=0; i<p->nChildCsr; i++){
@@ -2524,6 +2525,7 @@ void sqlite3VdbeMakeReady(
   */
   x.nNeeded = 0;
   p->aMem = allocSpace(&x, 0, nMem*sizeof(Mem));
+  assert( EIGHT_BYTE_ALIGNMENT(p->aMem) );
   p->aVar = allocSpace(&x, 0, nVar*sizeof(Mem));
   p->apArg = allocSpace(&x, 0, nArg*sizeof(Mem*));
   p->apCsr = allocSpace(&x, 0, nCursor*sizeof(VdbeCursor*));
@@ -2621,6 +2623,7 @@ int sqlite3VdbeFrameRestore(VdbeFrame *pFrame){
   v->aOp = pFrame->aOp;
   v->nOp = pFrame->nOp;
   v->aMem = pFrame->aMem;
+  assert( EIGHT_BYTE_ALIGNMENT(v->aMem) );
   v->nMem = pFrame->nMem;
   v->apCsr = pFrame->apCsr;
   v->nCursor = pFrame->nCursor;
@@ -4014,6 +4017,7 @@ UnpackedRecord *sqlite3VdbeAllocUnpackedRecord(
   p = (UnpackedRecord *)sqlite3DbMallocRaw(pKeyInfo->db, nByte);
   if( !p ) return 0;
   p->aMem = (Mem*)&((char*)p)[ROUND8P(sizeof(UnpackedRecord))];
+  assert( EIGHT_BYTE_ALIGNMENT(p->aMem) );
   assert( pKeyInfo->aSortFlags!=0 );
   p->pKeyInfo = pKeyInfo;
   p->nField = pKeyInfo->nKeyField + 1;

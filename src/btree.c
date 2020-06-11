@@ -4561,9 +4561,11 @@ static int btreeCursor(
 
   /* Now that no other errors can occur, finish filling in the BtCursor
   ** variables and link the cursor into the BtShared list.  */
+  assert(EIGHT_BYTE_ALIGNMENT(pCur));
   pCur->pgnoRoot = iTable;
   pCur->iPage = -1;
   pCur->pKeyInfo = pKeyInfo;
+  assert(EIGHT_BYTE_ALIGNMENT(&pCur->pKeyInfo));
   pCur->pBtree = p;
   pCur->pBt = pBt;
   pCur->curFlags = 0;
@@ -9128,6 +9130,7 @@ int sqlite3BtreeInsert(
         UnpackedRecord r;
         r.pKeyInfo = pCur->pKeyInfo;
         r.aMem = pX->aMem;
+        assert( EIGHT_BYTE_ALIGNMENT(r.aMem) );
         r.nField = pX->nMem;
         r.default_rc = 0;
         r.eqSeen = 0;
