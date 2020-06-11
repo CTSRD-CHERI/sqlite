@@ -545,7 +545,7 @@ struct BtCursor {
   u8 curIntKey;             /* Value of apPage[0]->intKey */
   u16 ix;                   /* Current index for apPage[iPage] */
   u16 aiIdx[BTCURSOR_MAX_DEPTH-1];     /* Current index in apPage[i] */
-  _Alignas(16) struct KeyInfo *pKeyInfo;            /* Arg passed to comparison function */
+  struct KeyInfo *pKeyInfo;            /* Arg passed to comparison function */
   MemPage *pPage;                        /* Current page */
   MemPage *apPage[BTCURSOR_MAX_DEPTH-1]; /* Stack of parents of current page */
 };
