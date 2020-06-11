@@ -4637,7 +4637,6 @@ static int btreeCursor(
   pCur->pgnoRoot = iTable;
   pCur->iPage = -1;
   pCur->pKeyInfo = pKeyInfo;
-  assert(EIGHT_BYTE_ALIGNMENT(&pCur->pKeyInfo));
   pCur->pBtree = p;
   pCur->pBt = pBt;
   pCur->curFlags = 0;
