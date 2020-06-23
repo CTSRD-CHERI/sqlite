@@ -155,8 +155,20 @@ static struct MemBlockHdr *sqlite3MemsysGetHeader(void *pAllocation){
   u8 *pU8;
   int nReserve;
 
+#ifndef __CHERI_PURE_CAPABILITY__
   p = (struct MemBlockHdr*)pAllocation;
   p--;
+#else
+  /*
+   * pAllocation's bounds shouldn't contain p so walk the whole list
+   * to find the original.
+   */
+  for ( p = mem->pFirst; p != NULL; p = p->pNext ) {
+    if ( p + 1 == pAllocation )
+      break;
+  }
+  assert( p != NULL )
+#endif
   assert( p->iForeGuard==(int)FOREGUARD );
   nReserve = ROUND8(p->iSize);
   pInt = (int*)pAllocation;
@@ -292,6 +304,13 @@ static void *sqlite3MemMalloc(int nByte){
     p = (void*)pInt;
   }
   sqlite3_mutex_leave(mem.mutex);
+#ifdef __CHERI_PURE_CAPABILITY__
+  /*
+   * XXX: imprecise bounds.  We'd need significantly more code change
+   * to set precise bounds due to potential misalignment by the header.
+   */
+  p = __builtin_cheri_bounds_set(p, nReserve);
+#endif
   return p; 
 }
 
