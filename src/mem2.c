@@ -42,19 +42,24 @@
 /*
 ** Each memory allocation looks like this:
 **
-**  ------------------------------------------------------------------------
-**  | Title |  backtrace pointers |  MemBlockHdr |  allocation |  EndGuard |
-**  ------------------------------------------------------------------------
+**  --------------------------------------------------------------------------
+**  | Pad | Title | backtrace pointers | MemBlockHdr | allocation | EndGuard |
+**  --------------------------------------------------------------------------
 **
 ** The application code sees only a pointer to the allocation.  We have
 ** to back up from the allocation pointer to find the MemBlockHdr.  The
 ** MemBlockHdr tells us the size of the allocation and the number of
 ** backtrace pointers.  There is also a guard word at the end of the
 ** MemBlockHdr.
+**
+** On CHERI systems we pad the front of the allocation to ensure
+** allocation is sufficently aligned.  We also exclude the EndGuard as it's
+** pointless with bounds.
 */
 struct MemBlockHdr {
   i64 iSize;                          /* Size of this allocation */
   struct MemBlockHdr *pNext, *pPrev;  /* Linked list of all unfreed memory */
+  void *pAllocation;                  /* What malloc allocated */
   char nBacktrace;                    /* Number of backtraces on this alloc */
   char nBacktraceSlots;               /* Available backtrace slots */
   u8 nTitle;                          /* Bytes of title; includes '\0' */
@@ -160,7 +165,7 @@ static struct MemBlockHdr *sqlite3MemsysGetHeader(void *pAllocation){
   p--;
 #else
   /*
-   * pAllocation's bounds shouldn't contain p so walk the whole list
+   * pAllocation's bounds don't contain p so walk the whole list
    * to find the original.
    */
   for ( p = mem->pFirst; p != NULL; p = p->pNext ) {
@@ -173,11 +178,13 @@ static struct MemBlockHdr *sqlite3MemsysGetHeader(void *pAllocation){
   nReserve = ROUND8(p->iSize);
   pInt = (int*)pAllocation;
   pU8 = (u8*)pAllocation;
+#ifndef __CHERI_PURE_CAPABILITY__
   assert( pInt[nReserve/sizeof(int)]==(int)REARGUARD );
   /* This checks any of the "extra" bytes allocated due
   ** to rounding up to an 8 byte boundary to ensure 
   ** they haven't been overwritten.
   */
+#endif
   while( nReserve-- > p->iSize ) assert( pU8[nReserve]==0x65 );
   return p;
 }
@@ -259,16 +266,29 @@ static void *sqlite3MemMalloc(int nByte){
   void *p = 0;
   int totalSize;
   int nReserve;
+  int nPad = 0;
   sqlite3_mutex_enter(mem.mutex);
   assert( mem.disallow==0 );
   nReserve = ROUND8(nByte);
-  totalSize = nReserve + sizeof(*pHdr) + sizeof(int) +
+#ifdef __CHERI_PURE_CAPABILITY__
+  nReserve = __builtin_cheri_round_representable_length(nReserve);
+#endif
+  totalSize = nReserve + sizeof(*pHdr) +
                mem.nBacktrace*sizeof(void*) + mem.nTitle;
+#ifdef __CHERI_PURE_CAPABILITY__
+  int roundedSize = __builtin_cheri_round_representable_length(totalSize);
+  nPad = roundedSize - totalSize;
+  totalSize = roundedSize;
+#else
+  totalSize += sizeof(int);	/* EndGuard */
+#endif
   p = malloc(totalSize);
   if( p ){
     z = p;
+    z += nPad;
     pBt = (void**)&z[mem.nTitle];
     pHdr = (struct MemBlockHdr*)&pBt[mem.nBacktrace];
+    pHdr->pAllocation = p;
     pHdr->pNext = 0;
     pHdr->pPrev = mem.pLast;
     if( mem.pLast ){
@@ -298,18 +318,17 @@ static void *sqlite3MemMalloc(int nByte){
     pHdr->iSize = nByte;
     adjustStats(nByte, +1);
     pInt = (int*)&pHdr[1];
+#ifndef __CHERI_PURE_CAPABILITY__
     pInt[nReserve/sizeof(int)] = REARGUARD;
+#endif
     randomFill((char*)pInt, nByte);
     memset(((char*)pInt)+nByte, 0x65, nReserve-nByte);
     p = (void*)pInt;
   }
   sqlite3_mutex_leave(mem.mutex);
 #ifdef __CHERI_PURE_CAPABILITY__
-  /*
-   * XXX: imprecise bounds.  We'd need significantly more code change
-   * to set precise bounds due to potential misalignment by the header.
-   */
-  p = __builtin_cheri_bounds_set(p, nReserve);
+  if ( p != NULL )
+    p = __builtin_cheri_bounds_set_exact(p, nReserve);
 #endif
   return p; 
 }
@@ -321,6 +340,7 @@ static void sqlite3MemFree(void *pPrior){
   struct MemBlockHdr *pHdr;
   void **pBt;
   char *z;
+  void *p;
   assert( sqlite3GlobalConfig.bMemstat || sqlite3GlobalConfig.bCoreMutex==0 
        || mem.mutex!=0 );
   pHdr = sqlite3MemsysGetHeader(pPrior);
@@ -341,12 +361,13 @@ static void sqlite3MemFree(void *pPrior){
     assert( mem.pLast==pHdr );
     mem.pLast = pHdr->pPrev;
   }
+  p = pHdr->pAllocation;
   z = (char*)pBt;
   z -= pHdr->nTitle;
   adjustStats((int)pHdr->iSize, -1);
   randomFill(z, sizeof(void*)*pHdr->nBacktraceSlots + sizeof(*pHdr) +
                 (int)pHdr->iSize + sizeof(int) + pHdr->nTitle);
-  free(z);
+  free(p);
   sqlite3_mutex_leave(mem.mutex);  
 }
 
