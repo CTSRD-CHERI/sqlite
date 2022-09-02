@@ -607,6 +607,9 @@
 ** hack only.
 */
 #ifdef SQLITE_INLINE_MEMCPY
+#ifdef __CHERI_PURE_CAPABILITY__
+#error SQLITE_INLINE_MEMCPY is not allowed when compiling for CheriABI.
+#endif
 # define memcpy(D,S,N) {char*xxd=(char*)(D);const char*xxs=(const char*)(S);\
                         int xxn=(N);while(xxn-->0)*(xxd++)=*(xxs++);}
 #endif
