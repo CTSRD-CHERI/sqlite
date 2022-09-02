@@ -1124,10 +1124,13 @@ static const Mem *columnNullValue(void){
   ** that a Mem structure is located on an 8-byte boundary. To prevent
   ** these assert()s from failing, when building with SQLITE_DEBUG defined
   ** using gcc, we force nullMem to be 8-byte aligned using the magical
-  ** __attribute__((aligned(8))) macro.  */
+  ** __attribute__((aligned(8))) macro.
+  ** For CheriABI, such alignment is increased to 16 bytes to satisfy that the
+  ** returned capability is appropriately aligned for CHERI architectures.
+  */
   static const Mem nullMem 
 #if defined(SQLITE_DEBUG) && defined(__GNUC__)
-    __attribute__((aligned(8))) 
+    __attribute__((aligned(SQLITE_DEFAULT_ALIGNMENT)))
 #endif
     = {
         /* .u          = */ {0},
