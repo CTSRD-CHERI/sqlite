@@ -8024,7 +8024,7 @@ static int balance_nonroot(
   */
   szScratch =
        nMaxCells*sizeof(u8*)                       /* b.apCell */
-     + nMaxCells*sizeof(u16)                       /* b.szCell */
+     + ROUND8(nMaxCells*sizeof(u16))               /* b.szCell */
      + pBt->pageSize;                              /* aSpace1 */
 
   assert( szScratch<=7*(int)pBt->pageSize );
@@ -8034,7 +8034,7 @@ static int balance_nonroot(
     goto balance_cleanup;
   }
   b.szCell = (u16*)&b.apCell[nMaxCells];
-  aSpace1 = (u8*)&b.szCell[nMaxCells];
+  aSpace1 = (u8*)ROUND8(&b.szCell[nMaxCells]);
   assert( EIGHT_BYTE_ALIGNMENT(aSpace1) );
 
   /*
