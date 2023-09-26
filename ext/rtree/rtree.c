@@ -4484,10 +4484,15 @@ static void geomCallback(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
   RtreeGeomCallback *pGeomCtx = (RtreeGeomCallback *)sqlite3_user_data(ctx);
   RtreeMatchArg *pBlob;
   sqlite3_int64 nBlob;
+  size_t apSqlParamOffset;
   int memErr = 0;
 
-  nBlob = sizeof(RtreeMatchArg) + (nArg-1)*sizeof(RtreeDValue)
-           + nArg*sizeof(sqlite3_value*);
+  nBlob = offsetof(RtreeMatchArg, aParam)
+          + nArg*sizeof(RtreeDValue);              /* RtreeMatchArg.aParam[] */
+  nBlob = ROUND8(nBlob);               /* Align for RtreeMatchArg.apSqlParam */
+  apSqlParamOffset = nBlob;
+  nBlob += nArg*sizeof(sqlite3_value*);          /* RtreeMatchArg.apSqlParam */
+
   pBlob = (RtreeMatchArg *)sqlite3_malloc64(nBlob);
   if( !pBlob ){
     sqlite3_result_error_nomem(ctx);
@@ -4495,7 +4500,8 @@ static void geomCallback(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
     int i;
     pBlob->iSize = nBlob;
     pBlob->cb = pGeomCtx[0];
-    pBlob->apSqlParam = (sqlite3_value**)&pBlob->aParam[nArg];
+    pBlob->apSqlParam = (sqlite3_value**)((u8*)pBlob + apSqlParamOffset);
+    assert( EIGHT_BYTE_ALIGNMENT(pBlob->apSqlParam) );
     pBlob->nParam = nArg;
     for(i=0; i<nArg; i++){
       pBlob->apSqlParam[i] = sqlite3_value_dup(aArg[i]);

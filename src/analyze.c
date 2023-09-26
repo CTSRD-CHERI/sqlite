@@ -411,6 +411,7 @@ static void statInit(
 #ifdef SQLITE_ENABLE_STAT4
   /* Maximum number of samples.  0 if STAT4 data is not collected */
   int mxSample = OptimizationEnabled(db,SQLITE_Stat4) ?SQLITE_STAT4_SAMPLES :0;
+  size_t aOff;                    /* Offset of StatAccum.a[] in blob */
 #endif
 
   /* Decode the three function arguments */
@@ -428,8 +429,9 @@ static void statInit(
     + sizeof(tRowcnt)*nColUp;                 /* StatAccum.anDLt */
 #ifdef SQLITE_ENABLE_STAT4
   if( mxSample ){
-    n += sizeof(tRowcnt)*nColUp                  /* StatAccum.anLt */
-      + sizeof(StatSample)*(nCol+mxSample)       /* StatAccum.aBest[], a[] */
+    n += sizeof(tRowcnt)*nColUp;                 /* StatAccum.anLt */
+    aOff = n = ROUND8(n);                        /* Align for StatAccum.a[] */
+    n += sizeof(StatSample)*(nCol+mxSample)      /* StatAccum.aBest[], a[] */
       + sizeof(tRowcnt)*3*nColUp*(nCol+mxSample);
   }
 #endif
@@ -461,7 +463,9 @@ static void statInit(
     p->iPrn = 0x689e962d*(u32)nCol ^ 0xd0944565*(u32)sqlite3_value_int(argv[2]);
   
     /* Set up the StatAccum.a[] and aBest[] arrays */
-    p->a = (struct StatSample*)&p->current.anLt[nColUp];
+    p->a = (struct StatSample*)((u8*)p + aOff);
+    assert( EIGHT_BYTE_ALIGNMENT(p->a) );
+
     p->aBest = &p->a[mxSample];
     pSpace = (u8*)(&p->a[mxSample+nCol]);
     for(i=0; i<(mxSample+nCol); i++){

@@ -8174,9 +8174,10 @@ static int balance_nonroot(
   /*
   ** Allocate space for memory structures
   */
+  size_t szCellSize = ROUND8(nMaxCells*sizeof(u16));
   szScratch =
        nMaxCells*sizeof(u8*)                       /* b.apCell */
-     + ROUND8(nMaxCells*sizeof(u16))               /* b.szCell */
+     + szCellSize                                  /* b.szCell */
      + pBt->pageSize;                              /* aSpace1 */
 
   assert( szScratch<=7*(int)pBt->pageSize );
@@ -8186,7 +8187,7 @@ static int balance_nonroot(
     goto balance_cleanup;
   }
   b.szCell = (u16*)&b.apCell[nMaxCells];
-  aSpace1 = (u8*)ROUND8(&b.szCell[nMaxCells]);
+  aSpace1 = (u8*)b.szCell + szCellSize;
   assert( EIGHT_BYTE_ALIGNMENT(aSpace1) );
 
   /*
