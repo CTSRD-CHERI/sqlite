@@ -143,8 +143,13 @@ struct VdbeCursor {
 ** or less.  The value of SZ_VDBECURSOR(n) is guaranteed to be a multiple
 ** of 8.
 */
+#if defined(__CHERI_PURE_CAPABILITY__)
+#define SZ_VDBECURSOR(N) \
+    (ROUND8(ROUND8(offsetof(VdbeCursor,aType)) + ((N)+1)*sizeof(u64)))
+#else
 #define SZ_VDBECURSOR(N) \
     (ROUND8(offsetof(VdbeCursor,aType)) + ((N)+1)*sizeof(u64))
+#endif  // !_CHERI_PURE_CAPABILITY__
 
 /* Return true if P is a null-only cursor
 */
