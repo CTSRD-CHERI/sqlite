@@ -305,7 +305,7 @@ static VdbeCursor *allocateCursor(
   pCx->aOffset = &pCx->aType[nField];
   if( eCurType==CURTYPE_BTREE ){
     pCx->uc.pCursor = (BtCursor*)
-        &pMem->z[ROUND8P(sizeof(VdbeCursor))+2*sizeof(u32)*nField];
+        &pMem->z[ROUND8P(ROUND8P(sizeof(VdbeCursor))+2*sizeof(u32)*nField)];
     sqlite3BtreeCursorZero(pCx->uc.pCursor);
   }
   return pCx;
