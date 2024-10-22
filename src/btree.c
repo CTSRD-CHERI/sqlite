@@ -8005,9 +8005,14 @@ static int balance_nonroot(
     }
   }
 
+#if defined(__CHERI_PURE_CAPABILITY__)
+  /* Make nMaxCells aligned to the default alignment. */
+  nMaxCells = ROUND8(nMaxCells);
+#else   // !__CHERI_PURE_CAPABILITY__
   /* Make nMaxCells a multiple of 4 in order to preserve 8-byte
   ** alignment */
   nMaxCells = (nMaxCells + 3)&~3;
+#endif  // !__CHERI_PURE_CAPABILITY__
 
   /*
   ** Allocate space for memory structures
