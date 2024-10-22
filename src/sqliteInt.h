@@ -957,6 +957,7 @@ typedef INT16_TYPE LogEst;
 #endif
 /* XXX: not actually 8 for CHERI */
 #define ROUND8(x) ROUND(x, SQLITE_DEFAULT_ALIGNMENT)
+#define ROUND8P(x) ROUND(x, SQLITE_DEFAULT_ALIGNMENT)
 
 /*
 ** Round down to the nearest multiple of 8
