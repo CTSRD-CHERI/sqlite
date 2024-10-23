@@ -304,7 +304,7 @@ void sqlite3NestedParse(Parse *pParse, const char *zFormat, ...){
   char *zSql;
   sqlite3 *db = pParse->db;
   u32 savedDbFlags = db->mDbFlags;
-  char saveBuf[PARSE_TAIL_SZ];
+  _Alignas(SQLITE_DEFAULT_ALIGNMENT) char saveBuf[PARSE_TAIL_SZ];
 
   if( pParse->nErr ) return;
   if( pParse->eParseMode ) return;
