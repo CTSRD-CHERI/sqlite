@@ -49,6 +49,7 @@ static const char zHelp[] =
 #include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
+#include <cheri/cheric.h>
 #ifndef _WIN32
 # include <unistd.h>
 #else
@@ -1711,6 +1712,20 @@ static int xCompileOptions(void *pCtx, int nVal, char **azVal, char **azCol){
 }
 
 int main(int argc, char **argv){
+  __attribute__((aligned(32)))
+  //static unsigned char heap[50 * 1024 * 1024];
+  void * heap = malloc(64 * 1024 * 1024);
+  sqlite3_shutdown();
+  sqlite3_config(SQLITE_CONFIG_SINGLETHREAD);
+  
+  int rc0 = sqlite3_config(SQLITE_CONFIG_HEAP, heap, 64 * 1024 * 1024, 32);
+  sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
+  sqlite3_initialize();
+  if (rc0 != SQLITE_OK){
+     fprintf(stderr, "Failed to configure memsys3 %d \n", rc0);
+     return 1;
+  }
+  //int rc1 = sqlite3_config(SQLITE_CONFIG_MALLOC, sqlite3MemGetMemsys3());
   int doAutovac = 0;            /* True for --autovacuum */
   int cacheSize = 0;            /* Desired cache size.  0 means default */
   int doExclusive = 0;          /* True for --exclusive */

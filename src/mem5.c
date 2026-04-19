@@ -49,6 +49,7 @@
 ** that an application can, at any time, verify this constraint.
 */
 #include "sqliteInt.h"
+#include "cheri/cheric.h"
 
 /*
 ** This version of the memory allocator is used only when 
@@ -69,6 +70,9 @@ struct Mem5Link {
   int next;       /* Index of next free chunk */
   int prev;       /* Index of previous free chunk */
 };
+
+static void* mem5_heap_cap;
+static uintptr_t mem5_heap_base;
 
 /*
 ** Maximum size of any allocation is ((1<<LOGMAX)*mem5.szAtom). Since
@@ -141,6 +145,7 @@ static SQLITE_WSD struct Mem5Global {
 ** structures, return a pointer to the idx-th such link.
 */
 #define MEM5LINK(idx) ((Mem5Link *)(&mem5.zPool[(idx)*mem5.szAtom]))
+//#define MEM5LINK(idx) ((Mem5Link *)cheri_setoffset(mem5_heap_cap, (idx)*mem5.szAtom))
 
 /*
 ** Unlink the chunk at mem5.aPool[i] from list it is currently
@@ -199,11 +204,16 @@ static void memsys5Leave(void){
 ** This only works for chunks that are currently checked out.
 */
 static int memsys5Size(void *p){
-  int iSize, i;
-  assert( p!=0 );
-  i = (int)(((u8 *)p-mem5.zPool)/mem5.szAtom);
-  assert( i>=0 && i<mem5.nBlock );
-  iSize = mem5.szAtom * (1 << (mem5.aCtrl[i]&CTRL_LOGSIZE));
+  //int iSize, i;
+  //assert( p!=0 );
+  //i = (int)(((u8 *)p-mem5.zPool)/mem5.szAtom);
+  //assert( i>=0 && i<mem5.nBlock );
+  //iSize = mem5.szAtom * (1 << (mem5.aCtrl[i]&CTRL_LOGSIZE));
+  //return iSize;
+  uintptr_t addr = cheri_getaddress(p);
+  uintptr_t base = mem5_heap_base; 
+  int i = (addr - base) / mem5.szAtom;
+  int iSize = mem5.szAtom  * (1 << (mem5.aCtrl[i] & CTRL_LOGSIZE));
   return iSize;
 }
 
@@ -249,6 +259,9 @@ static void *memsys5MallocUnsafe(int nByte){
   if( iBin>LOGMAX ){
     testcase( sqlite3GlobalConfig.xLog!=0 );
     sqlite3_log(SQLITE_NOMEM, "failed to allocate %u bytes", nByte);
+    //printf("malloc early return\n");
+    //for(int k =0 ; k < LOGMAX ; k++)
+    //  printf("freelist[%d] = %d\n", k, mem5.aiFreelist[k]);
     return 0;
   }
   i = mem5.aiFreelist[iBin];
@@ -277,11 +290,19 @@ static void *memsys5MallocUnsafe(int nByte){
 #ifdef SQLITE_DEBUG
   /* Make sure the allocated memory does not assume that it is set to zero
   ** or retains a value from a previous allocation */
-  memset(&mem5.zPool[i*mem5.szAtom], 0xAA, iFullSz);
+  //memset(&mem5.zPool[i*mem5.szAtom], 0xAA, iFullSz);
 #endif
-
+  if(!cheri_gettag(mem5.zPool))
+    printf("mem5.zPool is not tagged");
   /* Return a pointer to the allocated memory. */
-  return (void*)&mem5.zPool[i*mem5.szAtom];
+  //return (void*)&mem5.zPool[i*mem5.szAtom];
+  void* p =  cheri_setoffset(mem5_heap_cap, i*mem5.szAtom);
+  //if(cheri_gettag(p))
+  //  printf("p has tag\n");
+  //else 
+  //  printf("p has no tag\n");
+  assert(cheri_gettag(p));
+  return p;
 }
 
 /*
@@ -294,7 +315,10 @@ static void memsys5FreeUnsafe(void *pOld){
   /* Set iBlock to the index of the block pointed to by pOld in 
   ** the array of mem5.szAtom byte blocks pointed to by mem5.zPool.
   */
-  iBlock = (int)(((u8 *)pOld-mem5.zPool)/mem5.szAtom);
+  uintptr_t addr = cheri_getaddress(pOld);
+  uintptr_t base = mem5_heap_base;
+  iBlock = (addr - base) /mem5.szAtom;
+  //iBlock = (int)(((u8 *)pOld-mem5.zPool)/mem5.szAtom);
 
   /* Check that the pointer pOld points to a valid, non-free block. */
   assert( iBlock>=0 && iBlock<mem5.nBlock );
@@ -353,14 +377,61 @@ static void memsys5FreeUnsafe(void *pOld){
 /*
 ** Allocate nBytes of memory.
 */
+
+void * cclearpoisonperm(void * a){
+	void *ptr ;
+	uint64_t mask = ~(1ull << 12);
+    ptr = cheri_andperm(a, mask);
+
+	return ptr;
+}
+
+static inline void cclear(void * a){
+  asm volatile("cclearpoison %0, 0(%1)": :"C"(a),"C"(a));
+}
+
+static inline void
+clear_region(void *mem, size_t len)
+{
+	static const size_t ZERO_THRESHOLD = 64;
+
+	/*
+	 * For small regions that are qword-multiple-sized, use writes to avoid
+	 * memset call.  Alignment should be good in normal cases.
+	 */
+	if ((len <= ZERO_THRESHOLD) && (len % sizeof(uint64_t) == 0)) {
+		for (size_t i = 0; i < (len / sizeof(uint64_t)); i++) {
+			/*
+			 * volatile needed to avoid memset call by
+			 * compiler "optimization"
+			 */
+			((volatile uint64_t *)mem)[i] = 0;
+		}
+	} else {
+		memset(mem, 0, len);
+	}
+}
+
 static void *memsys5Malloc(int nBytes){
   sqlite3_int64 *p = 0;
+  //fprintf(stderr, "memsys5Malloc\n");
   if( nBytes>0 ){
     memsys5Enter();
     p = memsys5MallocUnsafe(nBytes);
     memsys5Leave();
   }
-  return (void*)p; 
+  //if(!cheri_gettag(p))
+  //  printf("malloc p has no tag %d\n", nBytes);
+  for(int i = 0 ; i< nBytes; i+=16){
+    cclear((void*)p+i);
+  }
+  clear_region(p, nBytes);
+
+  size_t alloc_size = memsys5Size(p);
+  void *bounded_p =  cheri_setbounds((void*)p, alloc_size);
+  //printf("cheri_getlen %lu\n", cheri_getlen(bounded_p));
+  bounded_p = cclearpoisonperm(bounded_p);
+  return bounded_p; 
 }
 
 /*
@@ -369,10 +440,32 @@ static void *memsys5Malloc(int nBytes){
 ** The outer layer memory allocator prevents this routine from
 ** being called with pPrior==0.
 */
+
+static inline void cpoison(char * a){
+  asm volatile("cpoison %0, 0(%1)": :"C"(a),"C"(a));
+}
+
+
+
 static void memsys5Free(void *pPrior){
   assert( pPrior!=0 );
+  //fprintf(stderr, "memsys5Free\n");
+
+  uintptr_t heap_base = cheri_getaddress(mem5_heap_cap);
+  uintptr_t addr      = cheri_getaddress(pPrior);
+
+  uintptr_t offset = addr - heap_base; 
+  offset &= ~(mem5.szAtom -1);
+  void *p = cheri_setoffset(mem5_heap_cap, offset);
+  int iBlock = offset/ mem5.szAtom;
+  int iLogsize = mem5.aCtrl[iBlock] &CTRL_LOGSIZE;
+  size_t size = mem5.szAtom * (1 << iLogsize);
+
+  void *bounded = cheri_setbounds(p, size);
+
   memsys5Enter();
-  memsys5FreeUnsafe(pPrior);
+  cpoison(bounded);
+  memsys5FreeUnsafe(p);
   memsys5Leave();  
 }
 
@@ -454,6 +547,11 @@ static int memsys5Init(void *NotUsed){
   int nMinLog;       /* Log base 2 of minimum allocation size in bytes */
   int iOffset;       /* An offset into mem5.aCtrl[] */
 
+  printf("INIT\n");
+  printf("nHeap= %d\n", sqlite3GlobalConfig.nHeap);
+  printf("pHeap= %p\n", sqlite3GlobalConfig.pHeap);
+  printf("mnReq= %d\n", sqlite3GlobalConfig.mnReq);
+
   UNUSED_PARAMETER(NotUsed);
 
   /* For the purposes of this routine, disable the mutex */
@@ -477,8 +575,13 @@ static int memsys5Init(void *NotUsed){
 
   mem5.nBlock = (nByte / (mem5.szAtom+sizeof(u8)));
   mem5.zPool = zByte;
-  mem5.aCtrl = (u8 *)&mem5.zPool[mem5.nBlock*mem5.szAtom];
+  mem5_heap_cap = cheri_setbounds(zByte, nByte); 
+  mem5_heap_base = cheri_getaddress(mem5_heap_cap);
+  assert(cheri_gettag(mem5_heap_cap));
 
+  //printf("heap tag =%d\n", cheri_gettag(mem5_heap_cap));
+  mem5.aCtrl = (u8 *)&mem5.zPool[mem5.nBlock*mem5.szAtom];
+  //mem5.aCtrl = cheri_setoffset(mem5_heap_cap, mem5.nBlock * mem5.szAtom);
   for(ii=0; ii<=LOGMAX; ii++){
     mem5.aiFreelist[ii] = -1;
   }
@@ -499,6 +602,9 @@ static int memsys5Init(void *NotUsed){
     mem5.mutex = sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_MEM);
   }
 
+  //for(int k=0; k <= LOGMAX ;k++)
+  //  printf("INIT freelist [%d]= %d\n", k, mem5.aiFreelist[k]);
+  //printf("nByte =%d szAtmo=%d nBlock=%d\n", nByte, mem5.szAtom, mem5.nBlock);
   return SQLITE_OK;
 }
 
