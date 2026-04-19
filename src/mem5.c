@@ -422,13 +422,16 @@ static void *memsys5Malloc(int nBytes){
   }
   //if(!cheri_gettag(p))
   //  printf("malloc p has no tag %d\n", nBytes);
-  for(int i = 0 ; i< nBytes; i+=16){
-    cclear((void*)p+i);
-  }
-  clear_region(p, nBytes);
+
+  
 
   size_t alloc_size = memsys5Size(p);
+  clear_region(mem5_heap_cap+cheri_getoffset(p), alloc_size);
+  //for(int i = 0 ; i< alloc_size; i+=16){
+  //  cclear((void*)p+i);
+  //}
   void *bounded_p =  cheri_setbounds((void*)p, alloc_size);
+  //printf("alloc_size =%zu\n", alloc_size);
   //printf("cheri_getlen %lu\n", cheri_getlen(bounded_p));
   bounded_p = cclearpoisonperm(bounded_p);
   return bounded_p; 
