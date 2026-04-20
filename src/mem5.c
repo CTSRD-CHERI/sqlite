@@ -98,6 +98,34 @@
 ** The size of this object must be a power of two.  That fact is
 ** verified in memsys5Init().
 */
+
+static inline void cclear(void * a){
+  asm volatile("cclearpoison %0, 0(%1)": :"C"(a),"C"(a));
+}
+
+static inline void
+clear_region(void *mem, size_t len)
+{
+	static const size_t ZERO_THRESHOLD = 64;
+
+	/*
+	 * For small regions that are qword-multiple-sized, use writes to avoid
+	 * memset call.  Alignment should be good in normal cases.
+	 */
+	if ((len <= ZERO_THRESHOLD) && (len % sizeof(uint64_t) == 0)) {
+		for (size_t i = 0; i < (len / sizeof(uint64_t)); i++) {
+			/*
+			 * volatile needed to avoid memset call by
+			 * compiler "optimization"
+			 */
+			((volatile uint64_t *)mem)[i] = 0;
+		}
+	} else {
+		memset(mem, 0, len);
+	}
+}
+
+
 typedef struct Mem5Link Mem5Link;
 struct Mem5Link {
   int next;       /* Index of next free chunk */
@@ -330,6 +358,7 @@ static void *memsys5MallocUnsafe(int nByte){
   /* Return a pointer to the allocated memory. */
   //return (void*)&mem5.zPool[i*mem5.szAtom];
   void* p =  cheri_setoffset(mem5_heap_cap, i*mem5.szAtom);
+  //clear_region(mem5_heap_cap + i*mem5.szAtom , iFullSz);
   //if(cheri_gettag(p))
   //  printf("p has tag\n");
   //else 
@@ -419,32 +448,6 @@ void * cclearpoisonperm(void * a){
 	return ptr;
 }
 
-static inline void cclear(void * a){
-  asm volatile("cclearpoison %0, 0(%1)": :"C"(a),"C"(a));
-}
-
-static inline void
-clear_region(void *mem, size_t len)
-{
-	static const size_t ZERO_THRESHOLD = 64;
-
-	/*
-	 * For small regions that are qword-multiple-sized, use writes to avoid
-	 * memset call.  Alignment should be good in normal cases.
-	 */
-	if ((len <= ZERO_THRESHOLD) && (len % sizeof(uint64_t) == 0)) {
-		for (size_t i = 0; i < (len / sizeof(uint64_t)); i++) {
-			/*
-			 * volatile needed to avoid memset call by
-			 * compiler "optimization"
-			 */
-			((volatile uint64_t *)mem)[i] = 0;
-		}
-	} else {
-		memset(mem, 0, len);
-	}
-}
-
 static void *memsys5Malloc(int nBytes){
   sqlite3_int64 *p = 0;
   //fprintf(stderr, "memsys5Malloc\n");
@@ -460,13 +463,16 @@ static void *memsys5Malloc(int nBytes){
 
   size_t alloc_size = memsys5Size(p);
   clear_region(mem5_heap_cap+cheri_getoffset(p), alloc_size);
-  //for(int i = 0 ; i< alloc_size; i+=16){
-  //  cclear((void*)p+i);
-  //}
+  for(int i = 0 ; i< alloc_size; i+=16){
+    void *addr = (char*) p + i;
+    cclear(addr);
+    *(volatile uint64_t*) addr = 0;
+    //cclear((void*)p+i);
+  }
   void *bounded_p =  cheri_setbounds((void*)p, alloc_size);
   //printf("alloc_size =%zu\n", alloc_size);
   //printf("cheri_getlen %lu\n", cheri_getlen(bounded_p));
-  bounded_p = cclearpoisonperm(bounded_p);
+  //bounded_p = cclearpoisonperm(bounded_p);
   return bounded_p; 
 }
 
@@ -614,16 +620,27 @@ static void memsys5Free(void *pPrior){
   int iBlock = offset/ mem5.szAtom;
   int iLogsize = mem5.aCtrl[iBlock] &CTRL_LOGSIZE;
   size_t size = mem5.szAtom * (1 << iLogsize);
-
+  //printf("poison size = %d\n",(int) size );
   void *bounded = cheri_setbounds(p, size);
 
+  size_t meta = sizeof(Mem5Link);
+  uintptr_t base = cheri_getaddress(bounded);
+  
+  uintptr_t payload_base = base+meta;
+  size_t payload_size = size -meta ;
+
+  char * payload = (char*) bounded + 16;
+
+
   memsys5Enter();
-  cpoison(bounded);
-	mrs_lock(&app_quarantine_lock);
-	quarantine_insert(app_quarantine, p, cheri_getlen(p));
-	mrs_unlock(&app_quarantine_lock);
+  //for(int i =0 ;i < memsys5Size(pPrior)/2 ; i+=16)
+	//mrs_lock(&app_quarantine_lock);
+	//quarantine_insert(app_quarantine, p, cheri_getlen(p));
+	//mrs_unlock(&app_quarantine_lock);
   memsys5FreeUnsafe(p);
   memsys5Leave();  
+  for(size_t i =16 ; i< size;i+=16)
+    cpoison(bounded + i);
 }
 
 /*
