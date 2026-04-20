@@ -205,7 +205,8 @@ static SQLITE_WSD struct Mem5Global {
 ** Assuming mem5.zPool is divided up into an array of Mem5Link
 ** structures, return a pointer to the idx-th such link.
 */
-#define MEM5LINK(idx) ((Mem5Link *)(&mem5.zPool[(idx)*mem5.szAtom]))
+//#define MEM5LINK(idx) ((Mem5Link *)(&mem5.zPool[(idx)*mem5.szAtom]))
+static Mem5Link *mem5_link; 
 //#define MEM5LINK(idx) ((Mem5Link *)cheri_setoffset(mem5_heap_cap, (idx)*mem5.szAtom))
 
 /*
@@ -218,15 +219,17 @@ static void memsys5Unlink(int i, int iLogsize){
   assert( iLogsize>=0 && iLogsize<=LOGMAX );
   assert( (mem5.aCtrl[i] & CTRL_LOGSIZE)==iLogsize );
 
-  next = MEM5LINK(i)->next;
-  prev = MEM5LINK(i)->prev;
+  next = mem5_link[i].next; //MEM5LINK(i)->next;
+  prev = mem5_link[i].prev; //MEM5LINK(i)->prev;
   if( prev<0 ){
     mem5.aiFreelist[iLogsize] = next;
   }else{
-    MEM5LINK(prev)->next = next;
+    //MEM5LINK(prev)->next = next;
+    mem5_link[prev].next = next; 
   }
   if( next>=0 ){
-    MEM5LINK(next)->prev = prev;
+    //MEM5LINK(next)->prev = prev;
+    mem5_link[next].prev = prev;
   }
 }
 
@@ -241,11 +244,14 @@ static void memsys5Link(int i, int iLogsize){
   assert( iLogsize>=0 && iLogsize<=LOGMAX );
   assert( (mem5.aCtrl[i] & CTRL_LOGSIZE)==iLogsize );
 
-  x = MEM5LINK(i)->next = mem5.aiFreelist[iLogsize];
-  MEM5LINK(i)->prev = -1;
+  //x = MEM5LINK(i)->next = mem5.aiFreelist[iLogsize];
+  //MEM5LINK(i)->prev = -1;
+  x = mem5_link[i].next = mem5.aiFreelist[iLogsize];
+  mem5_link[i].prev = -1;
   if( x>=0 ){
     assert( x<mem5.nBlock );
-    MEM5LINK(x)->prev = i;
+    //MEM5LINK(x)->prev = i;
+    mem5_link[x].prev = i;
   }
   mem5.aiFreelist[iLogsize] = i;
 }
@@ -639,7 +645,7 @@ static void memsys5Free(void *pPrior){
 	//mrs_unlock(&app_quarantine_lock);
   memsys5FreeUnsafe(p);
   memsys5Leave();  
-  for(size_t i =16 ; i< size;i+=16)
+  for(size_t i =0 ; i< size;i+=16)
     cpoison(bounded + i);
 }
 
@@ -760,6 +766,13 @@ static int memsys5Init(void *NotUsed){
     mem5.aiFreelist[ii] = -1;
   }
 
+
+  void *raw = mmap(NULL, mem5.nBlock* sizeof(Mem5Link), PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  if(raw == MAP_FAILED) return SQLITE_NOMEM; 
+  memset(raw, 0, mem5.nBlock * sizeof(Mem5Link));
+  mem5_link = cheri_setbounds(raw, mem5.nBlock * sizeof(Mem5Link));
+  if(!cheri_gettag(mem5_link))
+    printf("mem5_link has no tag\n");
   iOffset = 0;
   for(ii=LOGMAX; ii>=0; ii--){
     int nAlloc = (1<<ii);
@@ -781,6 +794,7 @@ static int memsys5Init(void *NotUsed){
   //printf("nByte =%d szAtmo=%d nBlock=%d\n", nByte, mem5.szAtom, mem5.nBlock);
   app_quarantine = mmap(NULL, sizeof(struct sql_quarantine), PROT_READ | PROT_WRITE, MAP_ANON, -1, 0);
   printf("app_quarantine tag=%d perms %lx\n", cheri_gettag(app_quarantine), cheri_getperm(app_quarantine));
+
 
   return SQLITE_OK;
 }
@@ -817,7 +831,7 @@ void sqlite3Memsys5Dump(const char *zFilename){
   memsys5Enter();
   nMinLog = memsys5Log(mem5.szAtom);
   for(i=0; i<=LOGMAX && i+nMinLog<32; i++){
-    for(n=0, j=mem5.aiFreelist[i]; j>=0; j = MEM5LINK(j)->next, n++){}
+    for(n=0, j=mem5.aiFreelist[i]; j>=0; j = mem5_link[j].next, n++){}
     fprintf(out, "freelist items of size %d: %d\n", mem5.szAtom << i, n);
   }
   fprintf(out, "mem5.nAlloc       = %llu\n", mem5.nAlloc);
