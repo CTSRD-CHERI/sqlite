@@ -279,7 +279,11 @@ static int memsys5Size(void *p){
   //return iSize;
   uintptr_t addr = cheri_getaddress(p);
   uintptr_t base = mem5_heap_base; 
-  int i = (addr - base) / mem5.szAtom;
+  
+  uintptr_t offset = addr - base; 
+  offset &= ~(mem5.szAtom -1);
+ 
+  int i = offset / mem5.szAtom;
   int iSize = mem5.szAtom  * (1 << (mem5.aCtrl[i] & CTRL_LOGSIZE));
   return iSize;
 }
@@ -442,6 +446,23 @@ static void memsys5FreeUnsafe(void *pOld){
   memsys5Link(iBlock, iLogsize);
 }
 
+#define QUARANTINE_MAX 4096
+#define QUARANTINE_EPOCH_DELAY 2
+
+struct quarantine_entry{
+  void * ptr; 
+  size_t size; 
+  //cheri_revoke_epoch_t epoch;
+};
+
+static struct quarantine_entry quarantine[QUARANTINE_MAX];
+static size_t q_head = 0;
+static size_t q_tail = 0;
+static size_t q_count =0;
+static size_t total_alloc_size = 0;
+static size_t quarantine_size = 0;
+static size_t revocation_count = 0;
+
 /*
 ** Allocate nBytes of memory.
 */
@@ -456,7 +477,7 @@ void * cclearpoisonperm(void * a){
 
 static void *memsys5Malloc(int nBytes){
   sqlite3_int64 *p = 0;
-  //fprintf(stderr, "memsys5Malloc\n");
+  
   if( nBytes>0 ){
     memsys5Enter();
     p = memsys5MallocUnsafe(nBytes);
@@ -468,7 +489,8 @@ static void *memsys5Malloc(int nBytes){
   
 
   size_t alloc_size = memsys5Size(p);
-  clear_region(mem5_heap_cap+cheri_getoffset(p), alloc_size);
+  total_alloc_size += alloc_size;
+  clear_region(cheri_setoffset(mem5_heap_cap, cheri_getoffset(p)), alloc_size);
   for(int i = 0 ; i< alloc_size; i+=16){
     void *addr = (char*) p + i;
     cclear(addr);
@@ -492,124 +514,58 @@ static void *memsys5Malloc(int nBytes){
 static inline void cpoison(char * a){
   asm volatile("cpoison %0, 0(%1)": :"C"(a),"C"(a));
 }
-static const size_t DESCRIPTOR_SLAB_ENTRIES = 10000;
 
 
-struct sql_descriptor_slab_entry {
-	void *ptr;
-	size_t size;
-};
+static void quarantine_flush(void){
+  //cheri_revoke_epoch_t now = cheri_revoke_st_get_epoch();
+  revocation_count+=1;
+  printf("revocation_count %d\n", (int)revocation_count);
+  while(q_count > 0){
+    struct quarantine_entry *e = &quarantine[q_head];
 
-struct sql_descriptor_slab {
-	int num_descriptors;
-	struct sql_descriptor_slab *next;
-	struct sql_descriptor_slab_entry slab[DESCRIPTOR_SLAB_ENTRIES];
-};
+    //if((now - e-> epoch) < QUARANTINE_EPOCH_DELAY ){
+    //  break;
+    //}
+    memsys5Enter();
+    memsys5FreeUnsafe(e -> ptr);
+    memsys5Leave();  
 
-struct sql_quarantine {
-	size_t size;
-	size_t max_size;
-	bool revoking;
-	cheri_revoke_epoch_t epoch;	/* valid when revoking */
-	struct sql_descriptor_slab *list;
-	TAILQ_ENTRY(mrs_quarantine) next;
-};
-
-/* XXX ABA and other issues ... should switch to atomics library */
-static struct sql_descriptor_slab * _Atomic free_descriptor_slabs;
-#define	APP_QUARANTINE_ARENAS	2
-_Static_assert(APP_QUARANTINE_ARENAS >= 2,
-    "APP_QUARANTINE_ARENAS must be at least 2");
-static struct sql_quarantine app_quarantine_store[APP_QUARANTINE_ARENAS];
-
-static struct sql_quarantine *app_quarantine;
-
-static inline __attribute__((always_inline)) void
-mrs_puts(const char *p)
-{
-	size_t n = strlen(p);
-	write(2, p, n);
+    q_head = (q_head + 1) % QUARANTINE_MAX;
+    size_t current_size = e->size;
+    quarantine_size = quarantine_size - current_size;
+    total_alloc_size -= current_size;
+    q_count --;
+  }
 }
 
-/* locks */
+static void check_and_flush(void){
+  if (total_alloc_size < 1024 * 1024*16)
+    return ;
 
-#define mrs_lock(mtx) do {						\
-	if (pthread_mutex_lock((mtx)) != 0) {				\
-		mrs_puts("pthread error\n");				\
-		exit(7);						\
-	}								\
-} while (0)
-
-#define mrs_unlock(mtx) do {						\
-	if (pthread_mutex_unlock((mtx)) != 0) {				\
-		mrs_puts("pthread error\n");				\
-		exit(7);						\
-	}								\
-} while (0)
-
-#define create_lock(name)						\
-	pthread_mutex_t name;						\
-	char name ## _buf[256] __attribute__((aligned(16)));		\
-									\
-	void *								\
-	name ## _storage(size_t num __unused, size_t size __unused)	\
-	{								\
-		return (name ## _buf);					\
-	}
-
-create_lock(app_quarantine_lock);
-
-
-static struct sql_descriptor_slab *
-alloc_descriptor_slab(void)
-{
-	if (free_descriptor_slabs == NULL) {
-		//mrs_debug_printf("alloc_descriptor_slab: mapping new memory\n");
-		void *ret = mmap(NULL, sizeof(struct sql_descriptor_slab),
-		    PROT_READ | PROT_WRITE, MAP_ANON, -1, 0);
-		return ((ret == MAP_FAILED) ? NULL : ret);
-	} else {
-		//mrs_debug_printf("alloc_descriptor_slab: reusing memory\n");
-		struct sql_descriptor_slab *ret = free_descriptor_slabs;
-
-		while (!atomic_compare_exchange_weak(&free_descriptor_slabs,
-		    &ret, ret->next))
-			;
-
-		ret->num_descriptors = 0;
-		return (ret);
-	}
+  if(quarantine_size*4  >= total_alloc_size){
+    quarantine_flush();
+  }
 }
 
-static inline void
-quarantine_insert(struct sql_quarantine *quarantine, void *ptr, size_t size)
-{
-	//MRS_UTRACE(UTRACE_MRS_QUARANTINE_INSERT, ptr, size, 0, NULL);
-	if (quarantine->list == NULL ||
-	    quarantine->list->num_descriptors == DESCRIPTOR_SLAB_ENTRIES) {
-		struct sql_descriptor_slab *ins = alloc_descriptor_slab();
-		if (ins == NULL) {
-			printf("quarantine_insert: couldn't allocate new descriptor slab\n");
-			exit(7);
-		}
-		ins->next = quarantine->list;
-		quarantine->list = ins;
-    printf("insert quarantine_list %d\n", cheri_gettag(quarantine->list));
-	}
+static void quarantine_revoke(void){
+  	(void)cheri_revoke(CHERI_REVOKE_ASYNC, 0, NULL);
 
-	//if ((__builtin_cheri_perms_get(ptr) & CHERI_PERM_SW_VMEM) == 0) {
-	//	printf("fatal error: can't insert pointer without SW_VMEM");
-	//	exit(7);
-	//}
+}
 
-	quarantine->list->slab[quarantine->list->num_descriptors].ptr = ptr;
-	quarantine->list->slab[quarantine->list->num_descriptors].size = size;
-	quarantine->list->num_descriptors++;
 
-	quarantine->size += size;
-	if (quarantine->size > quarantine->max_size) {
-		quarantine->max_size = quarantine->size;
-	}
+static void quarantine_insert(void* base, size_t size){
+  //cheri_revoke_epoch_t now = cheri_revoke_get_epoch();
+  if (q_count == QUARANTINE_MAX){
+    quarantine_flush();
+  }
+  
+  quarantine[q_tail].ptr = base;
+  quarantine[q_tail].size = size;
+  //quarantine[q_tail].epoch = now;
+
+  q_tail = (q_tail + 1) % QUARANTINE_MAX;
+  quarantine_size += size;
+  q_count +=1;
 }
 
 
@@ -641,12 +597,14 @@ static void memsys5Free(void *pPrior){
   memsys5Enter();
   //for(int i =0 ;i < memsys5Size(pPrior)/2 ; i+=16)
 	//mrs_lock(&app_quarantine_lock);
-	//quarantine_insert(app_quarantine, p, cheri_getlen(p));
+	quarantine_insert(p, size);
 	//mrs_unlock(&app_quarantine_lock);
-  memsys5FreeUnsafe(p);
+  //memsys5FreeUnsafe(p);
   memsys5Leave();  
+  //quarantine_insert(p, size);
   for(size_t i =0 ; i< size;i+=16)
     cpoison(bounded + i);
+  check_and_flush();
 }
 
 /*
@@ -792,10 +750,10 @@ static int memsys5Init(void *NotUsed){
   //for(int k=0; k <= LOGMAX ;k++)
   //  printf("INIT freelist [%d]= %d\n", k, mem5.aiFreelist[k]);
   //printf("nByte =%d szAtmo=%d nBlock=%d\n", nByte, mem5.szAtom, mem5.nBlock);
-  app_quarantine = mmap(NULL, sizeof(struct sql_quarantine), PROT_READ | PROT_WRITE, MAP_ANON, -1, 0);
-  printf("app_quarantine tag=%d perms %lx\n", cheri_gettag(app_quarantine), cheri_getperm(app_quarantine));
+  //app_quarantine = mmap(NULL, sizeof(struct sql_quarantine), PROT_READ | PROT_WRITE, MAP_ANON, -1, 0);
+  //printf("app_quarantine tag=%d perms %lx\n", cheri_gettag(app_quarantine), cheri_getperm(app_quarantine));
 
-
+  printf("heap len =%lu, expected = %d\n", cheri_getlen(mem5_heap_cap), nByte);
   return SQLITE_OK;
 }
 

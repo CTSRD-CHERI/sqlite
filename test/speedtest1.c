@@ -1714,7 +1714,7 @@ static int xCompileOptions(void *pCtx, int nVal, char **azVal, char **azCol){
 int main(int argc, char **argv){
   __attribute__((aligned(32)))
   //static unsigned char heap[50 * 1024 * 1024];
-  void * heap = malloc(64 * 1024 * 1024);
+  void * heap = malloc(256 * 1024 * 1024);
   sqlite3_shutdown();
   sqlite3_config(SQLITE_CONFIG_SINGLETHREAD);
   
