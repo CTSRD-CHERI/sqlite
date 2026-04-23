@@ -83,6 +83,7 @@
 
 #include <sys/elf.h>
 
+//#define NESTED_TEMPORAL
 
 /*
 ** This version of the memory allocator is used only when 
@@ -489,6 +490,7 @@ static void *memsys5Malloc(int nBytes){
   
 
   size_t alloc_size = memsys5Size(p);
+#ifdef NESTED_TEMPORAL
   total_alloc_size += alloc_size;
   clear_region(cheri_setoffset(mem5_heap_cap, cheri_getoffset(p)), alloc_size);
   for(int i = 0 ; i< alloc_size; i+=16){
@@ -497,6 +499,7 @@ static void *memsys5Malloc(int nBytes){
     *(volatile uint64_t*) addr = 0;
     //cclear((void*)p+i);
   }
+#endif 
   void *bounded_p =  cheri_setbounds((void*)p, alloc_size);
   //printf("alloc_size =%zu\n", alloc_size);
   //printf("cheri_getlen %lu\n", cheri_getlen(bounded_p));
@@ -579,32 +582,21 @@ static void memsys5Free(void *pPrior){
   uintptr_t offset = addr - heap_base; 
   offset &= ~(mem5.szAtom -1);
   void *p = cheri_setoffset(mem5_heap_cap, offset);
+
+  memsys5Enter();
+#ifdef NESTED_TEMPORAL
   int iBlock = offset/ mem5.szAtom;
   int iLogsize = mem5.aCtrl[iBlock] &CTRL_LOGSIZE;
   size_t size = mem5.szAtom * (1 << iLogsize);
-  //printf("poison size = %d\n",(int) size );
   void *bounded = cheri_setbounds(p, size);
-
-  size_t meta = sizeof(Mem5Link);
-  uintptr_t base = cheri_getaddress(bounded);
-  
-  uintptr_t payload_base = base+meta;
-  size_t payload_size = size -meta ;
-
-  char * payload = (char*) bounded + 16;
-
-
-  memsys5Enter();
-  //for(int i =0 ;i < memsys5Size(pPrior)/2 ; i+=16)
-	//mrs_lock(&app_quarantine_lock);
-	quarantine_insert(p, size);
-	//mrs_unlock(&app_quarantine_lock);
-  //memsys5FreeUnsafe(p);
-  memsys5Leave();  
-  //quarantine_insert(p, size);
+  quarantine_insert(p, size);
   for(size_t i =0 ; i< size;i+=16)
-    cpoison(bounded + i);
+  cpoison(bounded + i);
   check_and_flush();
+#else 
+  memsys5FreeUnsafe(p);
+#endif 
+  memsys5Leave();  
 }
 
 /*
