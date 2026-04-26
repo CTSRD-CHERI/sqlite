@@ -1718,7 +1718,7 @@ int main(int argc, char **argv){
   sqlite3_shutdown();
   sqlite3_config(SQLITE_CONFIG_SINGLETHREAD);
   
-  int rc0 = sqlite3_config(SQLITE_CONFIG_HEAP, heap, 64 * 1024 * 1024, 16);
+  int rc0 = sqlite3_config(SQLITE_CONFIG_HEAP, heap, 256 * 1024 * 1024, 16);
   sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
   sqlite3_initialize();
   if (rc0 != SQLITE_OK){

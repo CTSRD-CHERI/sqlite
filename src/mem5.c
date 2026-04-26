@@ -83,7 +83,8 @@
 
 #include <sys/elf.h>
 
-//#define NESTED_TEMPORAL
+
+#define NESTED_TEMPORAL 1
 
 /*
 ** This version of the memory allocator is used only when 
@@ -99,6 +100,22 @@
 ** The size of this object must be a power of two.  That fact is
 ** verified in memsys5Init().
 */
+
+static inline uint64_t
+cheri_revoke_get_cyc(void)
+{
+#if defined(__riscv)
+	return (__builtin_readcyclecounter());
+#elif defined(__aarch64__)
+	uint64_t _val;
+	__asm __volatile("mrs %0, cntvct_el0" : "=&r" (_val));
+	return (_val);
+#else
+	return (0);
+#endif
+}
+
+
 
 static inline void cclear(void * a){
   asm volatile("cclearpoison %0, 0(%1)": :"C"(a),"C"(a));
@@ -493,12 +510,12 @@ static void *memsys5Malloc(int nBytes){
 #ifdef NESTED_TEMPORAL
   total_alloc_size += alloc_size;
   clear_region(cheri_setoffset(mem5_heap_cap, cheri_getoffset(p)), alloc_size);
-  for(int i = 0 ; i< alloc_size; i+=16){
-    void *addr = (char*) p + i;
-    cclear(addr);
-    *(volatile uint64_t*) addr = 0;
-    //cclear((void*)p+i);
-  }
+  //for(int i = 0 ; i< alloc_size; i+=16){
+  //  void *addr = (char*) p + i;
+  //  //cclear(addr);
+  //  *(volatile uint64_t*) addr = 0;
+  //  //cclear((void*)p+i);
+  //}
 #endif 
   void *bounded_p =  cheri_setbounds((void*)p, alloc_size);
   //printf("alloc_size =%zu\n", alloc_size);
@@ -518,11 +535,10 @@ static inline void cpoison(char * a){
   asm volatile("cpoison %0, 0(%1)": :"C"(a),"C"(a));
 }
 
-
 static void quarantine_flush(void){
   //cheri_revoke_epoch_t now = cheri_revoke_st_get_epoch();
-  revocation_count+=1;
-  printf("revocation_count %d\n", (int)revocation_count);
+  //revocation_count+=1;
+  //printf("revocation_count %d\n", (int)revocation_count);
   while(q_count > 0){
     struct quarantine_entry *e = &quarantine[q_head];
 
@@ -540,19 +556,21 @@ static void quarantine_flush(void){
     q_count --;
   }
 }
+static void quarantine_revoke(void){
+  	(void)cheri_revoke(CHERI_REVOKE_ASYNC, 0, NULL);
+    quarantine_flush();
+
+}
+
 
 static void check_and_flush(void){
   if (total_alloc_size < 1024 * 1024*16)
     return ;
 
   if(quarantine_size*4  >= total_alloc_size){
-    quarantine_flush();
+    //quarantine_flush();
+    quarantine_revoke();
   }
-}
-
-static void quarantine_revoke(void){
-  	(void)cheri_revoke(CHERI_REVOKE_ASYNC, 0, NULL);
-
 }
 
 
@@ -591,7 +609,7 @@ static void memsys5Free(void *pPrior){
   void *bounded = cheri_setbounds(p, size);
   quarantine_insert(p, size);
   for(size_t i =0 ; i< size;i+=16)
-  cpoison(bounded + i);
+    cpoison(bounded + i);
   check_and_flush();
 #else 
   memsys5FreeUnsafe(p);
